@@ -1,12 +1,15 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using CyclingAnalyzer.Api.Data;
+using CyclingAnalyzer.Api.Extensions;
 using CyclingAnalyzer.Api.Services;
 
 namespace CyclingAnalyzer.Api.Controllers;
 
 [ApiController]
 [Route("api/rides")]
+[Authorize] // every endpoint in this controller requires a valid JWT
 public class RidesController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -18,49 +21,29 @@ public class RidesController : ControllerBase
         _ingestion = ingestion;
     }
 
-    // Trigger a sync for an athlete
-    [HttpPost("sync/{athleteId}")]
-    public async Task<IActionResult> Sync(long athleteId)
+    [HttpPost("sync")]
+    public async Task<IActionResult> Sync()
     {
-        // Verify athlete exists
-        var athlete = await _db.Athletes.FindAsync(athleteId);
-        if (athlete is null)
-            return NotFound($"Athlete {athleteId} not found in database.");
-
-        // Verify token exists
-        var token = await _db.AthleteTokens
-            .FirstOrDefaultAsync(t => t.AthleteId == athleteId);
-        if (token is null)
-            return NotFound($"No token found for athlete {athleteId}.");
-
-        // Show token status before trying to use it
-        var tokenStatus = new
-        {
-            hasToken     = true,
-            expiresAt    = token.ExpiresAt,
-            isExpired    = token.ExpiresAt <= DateTime.UtcNow,
-            updatedAt    = token.UpdatedAt,
-        };
-
+        // AthleteId now comes from the JWT — not the URL
+        var athleteId = User.GetAthleteId();
         var result = await _ingestion.IngestRidesAsync(athleteId);
 
         if (!result.Success)
-            return StatusCode(502, new { error = result.Error, tokenStatus });
+            return StatusCode(502, new { error = result.Error });
 
         return Ok(new
         {
-            message       = "Sync complete",
+            message = "Sync complete",
             newRidesCount = result.NewRidesCount,
-            tokenStatus,
+            newStreamsCount = result.NewStreamsCount,
         });
     }
-    // Get all rides for an athlete
-    [HttpGet("{athleteId}")]
-    public async Task<IActionResult> GetRides(
-        long athleteId,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20)
+
+    [HttpGet]
+    public async Task<IActionResult> GetRides([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
     {
+        var athleteId = User.GetAthleteId();
+
         var rides = await _db.Rides
             .Where(r => r.AthleteId == athleteId)
             .OrderByDescending(r => r.StartDate)

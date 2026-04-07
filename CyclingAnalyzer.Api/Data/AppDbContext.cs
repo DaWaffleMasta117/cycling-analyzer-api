@@ -10,6 +10,7 @@ public class AppDbContext : DbContext
     public DbSet<Athlete> Athletes => Set<Athlete>();
     public DbSet<AthleteToken> AthleteTokens => Set<AthleteToken>();
     public DbSet<Ride> Rides => Set<Ride>();
+    public DbSet<RidePowerStream> RidePowerStreams => Set<RidePowerStream>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -42,6 +43,20 @@ public class AppDbContext : DbContext
 
             // Index on AthleteId + StartDate — the most common query pattern
             entity.HasIndex(r => new { r.AthleteId, r.StartDate });
+        });
+
+        modelBuilder.Entity<RidePowerStream>(entity =>
+        {
+            // RideId is both the PK and the FK — strict 1-to-1 with Ride
+            entity.HasKey(s => s.RideId);
+
+            entity.HasOne(s => s.Ride)
+                  .WithOne()
+                  .HasForeignKey<RidePowerStream>(s => s.RideId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // WattsJson can be large (hours of second-by-second data)
+            entity.Property(s => s.WattsJson).IsRequired();
         });
     }
 }

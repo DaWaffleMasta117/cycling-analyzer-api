@@ -1,11 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using CyclingAnalyzer.Api.Data;
 using CyclingAnalyzer.Api.Models;
 using CyclingAnalyzer.Api.Models.Entities;
+using CyclingAnalyzer.Api.Services;
 using CyclingAnalyzer.Api.Settings;
-using CyclingAnalyzer.Api.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace CyclingAnalyzer.Api.Controllers;
 
@@ -17,17 +18,20 @@ public class AuthController : ControllerBase
     private readonly HttpClient _http;
     private readonly ILogger<AuthController> _logger;
     private readonly AppDbContext _db;
+    private readonly JwtService _jwtService;
 
     public AuthController(
         IOptions<StravaSettings> strava,
         IHttpClientFactory httpFactory,
         ILogger<AuthController> logger,
-        AppDbContext db)
+        AppDbContext db,
+        JwtService jwtService)
     {
         _strava = strava.Value;
-        _http   = httpFactory.CreateClient("strava");
+        _http = httpFactory.CreateClient("strava");
         _logger = logger;
-        _db     = db;
+        _db = db;
+        _jwtService = jwtService;
     }
 
     [HttpGet("login")]
@@ -45,7 +49,9 @@ public class AuthController : ControllerBase
     }
 
     [HttpGet("callback")]
-    public async Task<IActionResult> Callback([FromQuery] string code, [FromQuery] string? error)
+    public async Task<IActionResult> Callback(
+        [FromQuery] string code,
+        [FromQuery] string? error)
     {
         if (!string.IsNullOrEmpty(error))
             return BadRequest($"Strava authorisation denied: {error}");
@@ -55,13 +61,14 @@ public class AuthController : ControllerBase
 
         var tokenRequest = new FormUrlEncodedContent(new Dictionary<string, string>
         {
-            ["client_id"]     = _strava.ClientId,
+            ["client_id"] = _strava.ClientId,
             ["client_secret"] = _strava.ClientSecret,
-            ["code"]          = code,
-            ["grant_type"]    = "authorization_code",
+            ["code"] = code,
+            ["grant_type"] = "authorization_code",
         });
 
-        var response = await _http.PostAsync("https://www.strava.com/oauth/token", tokenRequest);
+        var response = await _http.PostAsync(
+            "https://www.strava.com/oauth/token", tokenRequest);
 
         if (!response.IsSuccessStatusCode)
             return StatusCode(502, "Failed to exchange token with Strava.");
@@ -72,89 +79,67 @@ public class AuthController : ControllerBase
         if (tokens is null || tokens.Athlete is null)
             return StatusCode(502, "Invalid token response from Strava.");
 
-        // Upsert athlete — update if exists, insert if new
+        // Upsert athlete
         var athlete = await _db.Athletes.FindAsync(tokens.Athlete.Id);
         if (athlete is null)
         {
             athlete = new Athlete
             {
-                Id        = tokens.Athlete.Id,
+                Id = tokens.Athlete.Id,
                 FirstName = tokens.Athlete.FirstName,
-                LastName  = tokens.Athlete.LastName,
-                WeightKg  = tokens.Athlete.Weight,
+                LastName = tokens.Athlete.LastName,
+                WeightKg = tokens.Athlete.Weight,
             };
             _db.Athletes.Add(athlete);
         }
         else
         {
             athlete.FirstName = tokens.Athlete.FirstName;
-            athlete.LastName  = tokens.Athlete.LastName;
-            athlete.WeightKg  = tokens.Athlete.Weight;
+            athlete.LastName = tokens.Athlete.LastName;
+            athlete.WeightKg = tokens.Athlete.Weight;
             athlete.UpdatedAt = DateTime.UtcNow;
         }
 
         // Upsert token
-        var existing = await _db.AthleteTokens.FirstOrDefaultAsync(t => t.AthleteId == tokens.Athlete.Id);
+        var existing = await _db.AthleteTokens
+            .FirstOrDefaultAsync(t => t.AthleteId == tokens.Athlete.Id);
 
-        var expiresAt = DateTimeOffset.FromUnixTimeSeconds(tokens.ExpiresAt).UtcDateTime;
+        var expiresAt = DateTimeOffset
+            .FromUnixTimeSeconds(tokens.ExpiresAt)
+            .UtcDateTime;
 
         if (existing is null)
         {
             _db.AthleteTokens.Add(new AthleteToken
             {
-                AthleteId    = tokens.Athlete.Id,
-                AccessToken  = tokens.AccessToken,
+                AthleteId = tokens.Athlete.Id,
+                AccessToken = tokens.AccessToken,
                 RefreshToken = tokens.RefreshToken,
-                ExpiresAt    = expiresAt,
+                ExpiresAt = expiresAt,
             });
         }
         else
         {
-            existing.AccessToken  = tokens.AccessToken;
+            existing.AccessToken = tokens.AccessToken;
             existing.RefreshToken = tokens.RefreshToken;
-            existing.ExpiresAt    = expiresAt;
-            existing.UpdatedAt    = DateTime.UtcNow;
+            existing.ExpiresAt = expiresAt;
+            existing.UpdatedAt = DateTime.UtcNow;
         }
 
         await _db.SaveChangesAsync();
 
-        _logger.LogInformation(
-            "Auth success for athlete {Id} — {First} {Last}",
+        // Generate JWT for the React frontend to use
+        var jwt = _jwtService.GenerateToken(
             tokens.Athlete.Id,
             tokens.Athlete.FirstName,
             tokens.Athlete.LastName);
 
-        return Ok(new
-        {
-            message   = "Authentication successful",
-            athleteId = tokens.Athlete.Id,
-            firstName = tokens.Athlete.FirstName,
-        });
-    }
+        // Redirect to React callback page with JWT in query params
+        var redirectUrl = $"http://localhost:5173/callback" +
+            $"?jwt={jwt}" +
+            $"&athleteId={tokens.Athlete.Id}" +
+            $"&firstName={Uri.EscapeDataString(tokens.Athlete.FirstName)}";
 
-    [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh([FromBody] string refreshToken)
-    {
-        var tokenRequest = new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["client_id"]     = _strava.ClientId,
-            ["client_secret"] = _strava.ClientSecret,
-            ["refresh_token"] = refreshToken,
-            ["grant_type"]    = "refresh_token",
-        });
-
-        var response = await _http.PostAsync("https://www.strava.com/oauth/token", tokenRequest);
-
-        if (!response.IsSuccessStatusCode)
-            return StatusCode(502, "Token refresh failed.");
-
-        var json   = await response.Content.ReadAsStringAsync();
-        var tokens = JsonSerializer.Deserialize<StravaTokenResponse>(json);
-
-        return Ok(new
-        {
-            accessToken = tokens?.AccessToken,
-            expiresAt   = tokens?.ExpiresAt,
-        });
+        return Redirect(redirectUrl);
     }
 }
