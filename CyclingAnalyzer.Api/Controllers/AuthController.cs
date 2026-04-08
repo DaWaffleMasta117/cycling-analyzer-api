@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using CyclingAnalyzer.Api.Data;
 using CyclingAnalyzer.Api.Models;
@@ -79,24 +80,44 @@ public class AuthController : ControllerBase
         if (tokens is null || tokens.Athlete is null)
             return StatusCode(502, "Invalid token response from Strava.");
 
+        // The OAuth token exchange returns a SummaryAthlete which does not include
+        // the weight field. Fetch the full DetailedAthlete profile to get it.
+        _http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+
+        float weightKg = 0f;
+        var profileResponse = await _http.GetAsync("https://www.strava.com/api/v3/athlete");
+        if (profileResponse.IsSuccessStatusCode)
+        {
+            var profileJson = await profileResponse.Content.ReadAsStringAsync();
+            var detailedAthlete = JsonSerializer.Deserialize<StravaAthlete>(profileJson);
+            weightKg = detailedAthlete?.Weight ?? 0f;
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Could not fetch detailed athlete profile: {Status}",
+                profileResponse.StatusCode);
+        }
+
         // Upsert athlete
         var athlete = await _db.Athletes.FindAsync(tokens.Athlete.Id);
         if (athlete is null)
         {
             athlete = new Athlete
             {
-                Id = tokens.Athlete.Id,
+                Id        = tokens.Athlete.Id,
                 FirstName = tokens.Athlete.FirstName,
-                LastName = tokens.Athlete.LastName,
-                WeightKg = tokens.Athlete.Weight,
+                LastName  = tokens.Athlete.LastName,
+                WeightKg  = weightKg,
             };
             _db.Athletes.Add(athlete);
         }
         else
         {
             athlete.FirstName = tokens.Athlete.FirstName;
-            athlete.LastName = tokens.Athlete.LastName;
-            athlete.WeightKg = tokens.Athlete.Weight;
+            athlete.LastName  = tokens.Athlete.LastName;
+            athlete.WeightKg  = weightKg;
             athlete.UpdatedAt = DateTime.UtcNow;
         }
 

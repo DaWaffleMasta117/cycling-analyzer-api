@@ -58,6 +58,35 @@ public class RideIngestionService
             new AuthenticationHeaderValue("Bearer", accessToken);
 
         // ----------------------------------------------------------------
+        // Weight refresh — the OAuth token exchange returns a SummaryAthlete
+        // without the weight field, so we fetch the full DetailedAthlete on
+        // every sync to keep the stored weight current.
+        // ----------------------------------------------------------------
+        var profileResponse = await _http.GetAsync("https://www.strava.com/api/v3/athlete");
+        if (profileResponse.IsSuccessStatusCode)
+        {
+            var profileJson = await profileResponse.Content.ReadAsStringAsync();
+            var detailedAthlete = JsonSerializer.Deserialize<StravaAthlete>(
+                profileJson, _jsonOptions);
+
+            if (detailedAthlete?.Weight > 0)
+            {
+                athlete.WeightKg  = detailedAthlete.Weight;
+                athlete.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+                _logger.LogInformation(
+                    "Updated weight for athlete {AthleteId}: {Weight}kg",
+                    athleteId, detailedAthlete.Weight);
+            }
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Could not fetch athlete profile during sync: {Status}",
+                profileResponse.StatusCode);
+        }
+
+        // ----------------------------------------------------------------
         // Phase 1 — ingest new rides from the activities list endpoint
         // ----------------------------------------------------------------
         var newRides = await FetchNewRidesAsync(athleteId, athlete);
