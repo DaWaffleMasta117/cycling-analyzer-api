@@ -21,6 +21,11 @@ public class AuthController : ControllerBase
     private readonly AppDbContext _db;
     private readonly JwtService _jwtService;
 
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     public AuthController(
         IOptions<StravaSettings> strava,
         IHttpClientFactory httpFactory,
@@ -44,7 +49,7 @@ public class AuthController : ControllerBase
             $"&redirect_uri={Uri.EscapeDataString(_strava.RedirectUri)}" +
             "&response_type=code" +
             "&approval_prompt=auto" +
-            "&scope=read,activity:read_all";
+            "&scope=read,activity:read_all,profile:read_all";
 
         return Redirect(stravaAuthUrl);
     }
@@ -90,7 +95,8 @@ public class AuthController : ControllerBase
         if (profileResponse.IsSuccessStatusCode)
         {
             var profileJson = await profileResponse.Content.ReadAsStringAsync();
-            var detailedAthlete = JsonSerializer.Deserialize<StravaAthlete>(profileJson);
+            var detailedAthlete = JsonSerializer.Deserialize<StravaAthlete>(
+                profileJson, _jsonOptions);
             weightKg = detailedAthlete?.Weight ?? 0f;
         }
         else
@@ -117,7 +123,7 @@ public class AuthController : ControllerBase
         {
             athlete.FirstName = tokens.Athlete.FirstName;
             athlete.LastName  = tokens.Athlete.LastName;
-            athlete.WeightKg  = weightKg;
+            if (weightKg > 0) athlete.WeightKg = weightKg;
             athlete.UpdatedAt = DateTime.UtcNow;
         }
 

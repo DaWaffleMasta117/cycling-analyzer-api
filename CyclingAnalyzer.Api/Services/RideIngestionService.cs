@@ -58,35 +58,6 @@ public class RideIngestionService
             new AuthenticationHeaderValue("Bearer", accessToken);
 
         // ----------------------------------------------------------------
-        // Weight refresh — the OAuth token exchange returns a SummaryAthlete
-        // without the weight field, so we fetch the full DetailedAthlete on
-        // every sync to keep the stored weight current.
-        // ----------------------------------------------------------------
-        var profileResponse = await _http.GetAsync("https://www.strava.com/api/v3/athlete");
-        if (profileResponse.IsSuccessStatusCode)
-        {
-            var profileJson = await profileResponse.Content.ReadAsStringAsync();
-            var detailedAthlete = JsonSerializer.Deserialize<StravaAthlete>(
-                profileJson, _jsonOptions);
-
-            if (detailedAthlete?.Weight > 0)
-            {
-                athlete.WeightKg  = detailedAthlete.Weight;
-                athlete.UpdatedAt = DateTime.UtcNow;
-                await _db.SaveChangesAsync();
-                _logger.LogInformation(
-                    "Updated weight for athlete {AthleteId}: {Weight}kg",
-                    athleteId, detailedAthlete.Weight);
-            }
-        }
-        else
-        {
-            _logger.LogWarning(
-                "Could not fetch athlete profile during sync: {Status}",
-                profileResponse.StatusCode);
-        }
-
-        // ----------------------------------------------------------------
         // Phase 1 — ingest new rides from the activities list endpoint
         // ----------------------------------------------------------------
         var newRides = await FetchNewRidesAsync(athleteId, athlete);
@@ -123,7 +94,7 @@ public class RideIngestionService
             .FirstOrDefaultAsync();
 
         var after = mostRecent is not null
-            ? new DateTimeOffset(mostRecent.StartDate).ToUnixTimeSeconds()
+            ? new DateTimeOffset(mostRecent.StartDate.AddDays(-1)).ToUnixTimeSeconds()
             : 0L;
 
         var newRides = new List<Ride>();
@@ -156,7 +127,7 @@ public class RideIngestionService
                 if (!IsCyclingActivity(activity)) continue;
 
                 // Only persist rides that have power meter data
-                if (activity.AverageWatts <= 0) continue;
+                if (activity.AverageWatts <= 0 || activity.MaxWatts <= 0) continue;
 
                 var exists = await _db.Rides.AnyAsync(r => r.Id == activity.Id);
                 if (exists) continue;
@@ -203,7 +174,7 @@ public class RideIngestionService
         // Find rides with power that are missing a stream record.
         // We LEFT JOIN via the navigation table and filter for nulls.
         var ridesNeedingStreams = await _db.Rides
-            .Where(r => r.AthleteId == athleteId && r.AveragePowerWatts > 0)
+            .Where(r => r.AthleteId == athleteId && r.AveragePowerWatts > 0 && r.MaxPowerWatts > 0)
             .Where(r => !_db.RidePowerStreams.Any(s => s.RideId == r.Id))
             .Select(r => r.Id)
             .ToListAsync();
