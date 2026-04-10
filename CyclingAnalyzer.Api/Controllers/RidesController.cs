@@ -58,7 +58,7 @@ public class RidesController : ControllerBase
                 r.ElevationGainMeters,
                 r.AveragePowerWatts,
                 r.MaxPowerWatts,
-                r.AverageHeartRate,
+                r.NormalizedPowerWatts,
                 r.StartDate,
             })
             .ToListAsync();

@@ -25,11 +25,8 @@ public class StravaActivityResponse
     [JsonPropertyName("max_watts")]
     public float MaxWatts { get; init; }
 
-    [JsonPropertyName("average_heartrate")]
-    public float AverageHeartrate { get; init; }
-
-    [JsonPropertyName("max_heartrate")]
-    public float MaxHeartrate { get; init; }
+    [JsonPropertyName("weighted_average_watts")]
+    public float WeightedAverageWatts { get; init; }
 
     [JsonPropertyName("average_speed")]
     public float AverageSpeed { get; init; }

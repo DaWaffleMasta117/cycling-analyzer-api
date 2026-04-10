@@ -134,19 +134,17 @@ public class RideIngestionService
 
                 newRides.Add(new Ride
                 {
-                    Id                  = activity.Id,
-                    AthleteId           = athleteId,
-                    Name                = activity.Name,
-                    DistanceMeters      = activity.Distance,
-                    MovingTimeSeconds   = activity.MovingTime,
-                    ElevationGainMeters = activity.TotalElevationGain,
-                    AveragePowerWatts   = activity.AverageWatts,
-                    MaxPowerWatts       = activity.MaxWatts,
-                    AverageHeartRate    = activity.AverageHeartrate,
-                    MaxHeartRate        = activity.MaxHeartrate,
-                    AverageSpeedMs      = activity.AverageSpeed,
-                    WeightKgAtTime      = athlete.WeightKg,
-                    StartDate           = activity.StartDate,
+                    Id                   = activity.Id,
+                    AthleteId            = athleteId,
+                    Name                 = activity.Name,
+                    DistanceMeters       = activity.Distance,
+                    MovingTimeSeconds    = activity.MovingTime,
+                    ElevationGainMeters  = activity.TotalElevationGain,
+                    AveragePowerWatts    = activity.AverageWatts,
+                    MaxPowerWatts        = activity.MaxWatts,
+                    NormalizedPowerWatts = activity.WeightedAverageWatts,
+                    AverageSpeedMs       = activity.AverageSpeed,
+                    StartDate            = activity.StartDate,
                 });
             }
 

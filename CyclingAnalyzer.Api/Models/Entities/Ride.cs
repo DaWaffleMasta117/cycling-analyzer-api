@@ -10,10 +10,8 @@ public class Ride
     public float ElevationGainMeters { get; set; }
     public float AveragePowerWatts { get; set; }
     public float MaxPowerWatts { get; set; }
-    public float AverageHeartRate { get; set; }
-    public float MaxHeartRate { get; set; }
+    public float NormalizedPowerWatts { get; set; }
     public float AverageSpeedMs { get; set; }
-    public float WeightKgAtTime { get; set; }
     public DateTime StartDate { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
