@@ -20,6 +20,7 @@ public class AuthController : ControllerBase
     private readonly ILogger<AuthController> _logger;
     private readonly AppDbContext _db;
     private readonly JwtService _jwtService;
+    private readonly string _frontendUrl;
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -31,13 +32,20 @@ public class AuthController : ControllerBase
         IHttpClientFactory httpFactory,
         ILogger<AuthController> logger,
         AppDbContext db,
-        JwtService jwtService)
+        JwtService jwtService,
+        IConfiguration configuration)
     {
         _strava = strava.Value;
         _http = httpFactory.CreateClient("strava");
         _logger = logger;
         _db = db;
         _jwtService = jwtService;
+        // Read from config so the same binary works in dev and on the server.
+        // Dev:  appsettings.Development.json → "http://localhost:5173"
+        // Prod: appsettings.json (or env var) → "https://yourcyclingapp.com"
+        _frontendUrl = configuration["FrontendUrl"]
+            ?? throw new InvalidOperationException(
+                "FrontendUrl is not configured. Add it to appsettings.json.");
     }
 
     [HttpGet("login")]
@@ -161,8 +169,9 @@ public class AuthController : ControllerBase
             tokens.Athlete.FirstName,
             tokens.Athlete.LastName);
 
-        // Redirect to React callback page with JWT in query params
-        var redirectUrl = $"http://localhost:5173/callback" +
+        // Redirect to React callback page with JWT in query params.
+        // _frontendUrl comes from config — no hardcoded localhost here.
+        var redirectUrl = $"{_frontendUrl.TrimEnd('/')}/callback" +
             $"?jwt={jwt}" +
             $"&athleteId={tokens.Athlete.Id}" +
             $"&firstName={Uri.EscapeDataString(tokens.Athlete.FirstName)}";
